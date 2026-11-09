@@ -1,0 +1,6 @@
+{
+  "name": "usage-status",
+  "description": "Shows your Claude 5-hour and weekly usage in a small status line.",
+  "owner": { "name": "Ashvikraina" },
+  "plugins": [{ "name": "usage-status", "source": "./" }]
+}
