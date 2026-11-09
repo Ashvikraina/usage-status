@@ -24,6 +24,25 @@ function usageLine(limits: readonly SessionRateLimit[], now: number): string | u
 }
 
 export const register: Register = on => {
+  // A new session learns the usage figures only from an API response, which
+  // the first reply's own arrives too late for. So before the first turn, if
+  // there are none yet, send one tiny request (a few tokens) to fetch them.
+  let warmed = false
+  on('turn.start', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId === undefined && !warmed) {
+      warmed = true
+      try {
+        if ((await $.session.usage()).rateLimits.length === 0) {
+          await $.model.complete({ model: 'haiku', prompt: 'Reply with: ok', maxTokens: 1, timeoutMs: 5000 })
+        }
+      } catch {
+        // No figures this turn; the line appears from the next reply on.
+      }
+    }
+    return result
+  })
+
   // Add the usage line to the end of the reply's final text, as it streams:
   // hold back the latest text piece (and engine items after it) until the
   // next real chunk shows whether more is coming.

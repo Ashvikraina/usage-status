@@ -1,1 +1,1 @@
-{ "name": "usage-status", "version": "0.4.0", "description": "Ends each Claude reply with your 5-hour and weekly usage and when each resets." }
+{ "name": "usage-status", "version": "0.5.0", "description": "Ends each Claude reply with your 5-hour and weekly usage and when each resets." }
