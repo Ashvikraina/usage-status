@@ -1,1 +1,1 @@
-{ "name": "usage-status", "version": "0.1.0", "description": "Shows your 5-hour session and weekly usage limits in a small status line." }
+{ "name": "usage-status", "version": "0.2.0", "description": "Shows your 5-hour session and weekly usage limits in a small status line.", "types": "./types/index.d.ts" }

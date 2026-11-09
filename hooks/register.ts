@@ -1,4 +1,8 @@
-import type { Register, SessionRateLimit } from 'claude-code'
+import { atom, read, update } from 'claude-code'
+import type { EngineInterface, Register, SessionRateLimit } from 'claude-code'
+
+// The text drawn in the footer; writing it redraws the footer.
+const usageLine = atom({ plugin: 'usage-status', key: 'line' } as const, null)
 
 // Last windows the engine reported; refreshed by session.measure.
 let limits: SessionRateLimit[] = []
@@ -17,13 +21,18 @@ function untilReset(resetsAt: string | undefined, now: number): string {
   return ` ↻${span}`
 }
 
-function line(now: number): string | undefined {
+function line(now: number): string {
   const parts = ['five_hour', 'seven_day']
     .map(kind => limits.find(l => l.kind === kind))
     .filter((l): l is SessionRateLimit => l !== undefined)
     .map(l => `${LABELS[l.kind]} ${Math.round(l.percentUsed)}%${untilReset(l.resetsAt, now)}`)
-  if (parts.length === 0) return 'usage: waiting for first reply…'
-  return parts.join(' · ')
+  return parts.length === 0 ? 'usage: waiting for first reply…' : parts.join(' · ')
+}
+
+async function show($: EngineInterface): Promise<void> {
+  const text = line(await $.clock.now())
+  $.ui.status(text) // terminal: the status line under the prompt
+  await update($, usageLine, () => text) // desktop/terminal: the prompt footer
 }
 
 export const register: Register = on => {
@@ -34,17 +43,22 @@ export const register: Register = on => {
     } catch {
       limits = []
     }
-    $.ui.status(line(await $.clock.now()))
+    await show($)
     // Keep the reset countdowns current between turns.
-    $.clock.every(60_000, () => {
-      void $.clock.now().then(now => $.ui.status(line(now)))
-    })
+    $.clock.every(60_000, () => void show($))
     return result
   })
 
   on('session.measure', async ($, e, next) => {
     limits = e.rateLimits
-    $.ui.status(line(await $.clock.now()))
+    await show($)
     return next(e)
+  })
+
+  // Add the usage to the small labels at the right of the prompt footer.
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    const text = await read($, usageLine)
+    if (!text) return next(e)
+    return next({ ...e, props: { ...e.props, modes: [...e.props.modes, text] } })
   })
 }
