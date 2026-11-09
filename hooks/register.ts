@@ -1,15 +1,9 @@
-import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, SessionRateLimit } from 'claude-code'
+import type { Register, SessionRateLimit, TurnStepChunk } from 'claude-code'
 
-// The text drawn in the footer; writing it redraws the footer.
-const usageLine = atom({ plugin: 'usage-status', key: 'line' } as const, null)
+const NAMES: Record<string, string> = { five_hour: '5-hour', seven_day: 'Weekly' }
+const MARK = '⏱'
 
-// Last windows the engine reported; refreshed by session.measure.
-let limits: SessionRateLimit[] = []
-
-const LABELS: Record<string, string> = { five_hour: '5h', seven_day: 'wk' }
-
-function untilReset(resetsAt: string | undefined, now: number): string {
+function resetsIn(resetsAt: string | undefined, now: number): string {
   if (!resetsAt) return ''
   const ms = Date.parse(resetsAt) - now
   if (!(ms > 0)) return ''
@@ -17,48 +11,62 @@ function untilReset(resetsAt: string | undefined, now: number): string {
   const d = Math.floor(mins / 1440)
   const h = Math.floor((mins % 1440) / 60)
   const m = mins % 60
-  const span = d > 0 ? `${d}d${h}h` : h > 0 ? `${h}h${String(m).padStart(2, '0')}m` : `${m}m`
-  return ` ↻${span}`
+  const span = d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`
+  return `, resets in ${span}`
 }
 
-function line(now: number): string {
+function usageLine(limits: readonly SessionRateLimit[], now: number): string | undefined {
   const parts = ['five_hour', 'seven_day']
     .map(kind => limits.find(l => l.kind === kind))
     .filter((l): l is SessionRateLimit => l !== undefined)
-    .map(l => `${LABELS[l.kind]} ${Math.round(l.percentUsed)}%${untilReset(l.resetsAt, now)}`)
-  return parts.length === 0 ? 'usage: waiting for first reply…' : parts.join(' · ')
-}
-
-async function show($: EngineInterface): Promise<void> {
-  const text = line(await $.clock.now())
-  $.ui.status(text) // terminal: the status line under the prompt
-  await update($, usageLine, () => text) // desktop/terminal: the prompt footer
+    .map(l => `${NAMES[l.kind]} ${Math.round(l.percentUsed)}%${resetsIn(l.resetsAt, now)}`)
+  return parts.length === 0 ? undefined : `${MARK} ${parts.join(' · ')}`
 }
 
 export const register: Register = on => {
-  on('session.start', async ($, e, next) => {
-    const result = await next(e)
-    try {
-      limits = (await $.session.usage()).rateLimits
-    } catch {
-      limits = []
+  // Add the usage line to the end of the reply's final text, as it streams:
+  // hold back the latest text piece (and engine items after it) until the
+  // next real chunk shows whether more is coming.
+  on('turn.step', async function* ($, e, next) {
+    if (e.agentId !== undefined) return yield* next(e)
+    let held: TurnStepChunk[] = []
+    let sawTool = false
+    for await (const chunk of next(e)) {
+      if (chunk.kind === 'tool') sawTool = true
+      if (chunk.kind === 'engine' && held.length > 0) {
+        held.push(chunk)
+        continue
+      }
+      if (chunk.kind === 'stop' && !sawTool && held[0]?.kind === 'text') {
+        try {
+          const [{ rateLimits }, now] = await Promise.all([$.session.usage(), $.clock.now()])
+          const line = usageLine(rateLimits, now)
+          const first = held[0]
+          if (line) held[0] = { ...first, text: `${first.text}\n\n*${line}*` }
+        } catch {
+          // Never let the usage line get in the way of the reply.
+        }
+      }
+      for (const h of held) yield h
+      held = []
+      if (chunk.kind === 'text') held = [chunk]
+      else yield chunk
     }
-    await show($)
-    // Keep the reset countdowns current between turns.
-    $.clock.every(60_000, () => void show($))
-    return result
+    for (const h of held) yield h
   })
 
-  on('session.measure', async ($, e, next) => {
-    limits = e.rateLimits
-    await show($)
-    return next(e)
-  })
-
-  // Add the usage to the small labels at the right of the prompt footer.
-  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
-    const text = await read($, usageLine)
-    if (!text) return next(e)
-    return next({ ...e, props: { ...e.props, modes: [...e.props.modes, text] } })
+  // One short system-prompt note so Claude never writes the line itself.
+  on('prompt.compose', async ($, e, next) => {
+    const { sections } = await next(e)
+    return {
+      sections: [
+        ...sections,
+        {
+          id: 'usage-status',
+          scope: 'session',
+          text: `Lines starting with ${MARK} at the end of your earlier replies were added automatically by a plugin. Never write one yourself.`,
+        },
+      ],
+    }
   })
 }

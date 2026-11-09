@@ -1,15 +1,15 @@
 # usage-status
 
-A Claude Code mod that keeps a small status line under the prompt showing how much of your
-**5-hour session limit** and **weekly limit** you've used, plus when each one resets:
+A Claude Code mod that ends each of Claude's replies with a small line showing how much of your
+**5-hour session limit** and **weekly limit** you've used, and when each one resets:
 
-```
-5h 23% ↻1h12m · wk 41% ↻3d4h
-```
+*⏱ 5-hour 11%, resets in 40m · Weekly 1%, resets in 6d 22h*
 
-The percentages update after each reply from Claude, and the countdowns refresh every minute.
-It shows figures only on a Claude subscription (API-key sessions have no such limits), and
-only after the first reply of a session, since that's when Claude Code learns your usage.
+The numbers come from Claude Code itself, not from the model, so they cost nothing to fetch. The
+line becomes part of the reply, so later turns carry it (about 25 tokens each), and a one-sentence
+system-prompt note stops Claude from ever writing the line itself. It only shows figures on a
+Claude subscription (API-key sessions have no such limits). It works in the terminal, the desktop
+app and cloud sessions alike.
 
 ## Install
 
